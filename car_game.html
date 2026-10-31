@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drive Game</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(180deg, #0f172a, #111827);
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    .game-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hud {
+      width: 420px;
+      display: flex;
+      justify-content: space-between;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .hud div {
+      text-align: center;
+    }
+
+    .hud strong {
+      display: block;
+      opacity: 0.7;
+      font-size: 11px;
+    }
+
+    .hud span {
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    canvas {
+      display: block;
+      background: #111;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="game-wrap">
+    <div class="hud">
+      <div><strong>Score</strong><span id="score">0</span></div>
+      <div><strong>Speed</strong><span id="speed">0</span></div>
+      <div><strong>Boost</strong><span id="boost">100%</span></div>
+    </div>
+    <canvas id="gameCanvas" width="420" height="620"></canvas>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const scoreEl = document.getElementById('score');
+    const speedEl = document.getElementById('speed');
+    const boostEl = document.getElementById('boost');
+
+    const road = {
+      left: 70,
+      width: 280,
+      right: 350,
+      speed: 0,
+      scroll: 0
+    };
+
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height - 100,
+      width: 34,
+      height: 66,
+      color: '#3ae374',
+      speed: 0,
+      maxSpeed: 360,
+      accel: 210,
+      friction: 120,
+      angle: 0,
+      turnRate: 2.5,
+      boost: 100
+    };
+
+    const keys = {
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+      boost: false
+    };
+
+    let obstacles = [];
+    let coins = [];
+    let score = 0;
+    let gameOver = false;
+    let lastTime = 0;
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function resetPlayer() {
+      player.x = canvas.width / 2;
+      player.y = canvas.height - 100;
+      player.speed = 0;
+      player.angle = 0;
+      player.boost = 100;
+      score = 0;
+      scoreEl.textContent = score;
+    }
+
+    function resetGame() {
+      obstacles = [];
+      coins = [];
+      gameOver = false;
+      resetPlayer();
+      updateHud();
+    }
+
+    function updateHud() {
+      scoreEl.textContent = Math.floor(score);
+      speedEl.textContent = Math.abs(Math.round(player.speed));
+      boostEl.textContent = Math.round(player.boost) + '%';
+    }
+
+    function spawnObstacle() {
+      const lane = Math.random() * (road.width - 40) + road.left + 20;
+      obstacles.push({
+        x: lane,
+        y: -80,
+        width: 36,
+        height: 70,
+        color: ['#ff4757', '#ff9f43', '#e056fd', '#1e90ff'][Math.floor(Math.random() * 4)]
+      });
+    }
+
+    function spawnCoin() {
+      const lane = Math.random() * (road.width - 30) + road.left + 15;
+      coins.push({
+        x: lane,
+        y: -20,
+        radius: 10,
+        color: '#ffd93d'
+      });
+    }
+
+    function isColliding(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    function circleHit(cx, cy, r, rect) {
+      const closestX = clamp(cx, rect.x, rect.x + rect.width);
+      const closestY = clamp(cy, rect.y, rect.y + rect.height);
+      const dx = cx - closestX;
+      const dy = cy - closestY;
+      return dx * dx + dy * dy < r * r;
+    }
+
+    function update(dt) {
+      if (gameOver) return;
+
+      const steer = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+      if (steer !== 0) {
+        player.angle += steer * player.turnRate * dt * (0.5 + Math.abs(player.speed) / 180);
+      }
+
+      if (keys.up) {
+        player.speed += player.accel * dt;
+      } else {
+        player.speed -= player.friction * dt;
+      }
+
+      if (keys.down) {
+        player.speed -= (player.accel + 80) * dt;
+      }
+
+      player.speed = clamp(player.speed, -160, player.maxSpeed);
+
+      if (keys.boost && player.boost > 0) {
+        player.speed += 280 * dt;
+        player.boost = clamp(player.boost - 35 * dt, 0, 100);
+      } else {
+        player.boost = clamp(player.boost + 12 * dt, 0, 100);
+      }
+
+      player.x += Math.sin(player.angle) * player.speed * dt * 0.9;
+      player.y -= Math.cos(player.angle) * player.speed * dt * 0.7;
+
+      if (player.x < road.left + 18) player.x = road.left + 18;
+      if (player.x > road.right - 18) player.x = road.right - 18;
+      if (player.y < 100) player.y = 100;
+      if (player.y > canvas.height - 70) player.y = canvas.height - 70;
+
+      road.scroll += Math.abs(player.speed) * dt * 0.8;
+      score += Math.abs(player.speed) * dt * 0.12;
+      updateHud();
+
+      if (Math.random() < 0.025 + Math.abs(player.speed) / 8000) {
+        spawnObstacle();
+      }
+      if (Math.random() < 0.012) {
+        spawnCoin();
+      }
+
+      for (const obs of obstacles) {
+        obs.y += (120 + Math.abs(player.speed) * 0.7) * dt;
+      }
+
+      for (const coin of coins) {
+        coin.y += (120 + Math.abs(player.speed) * 0.7) * dt;
+      }
+
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        if (isColliding(player, obstacles[i])) {
+          gameOver = true;
+          break;
+        }
+        if (obstacles[i].y > canvas.height + 120) obstacles.splice(i, 1);
+      }
+
+      for (let i = coins.length - 1; i >= 0; i--) {
+        if (circleHit(coins[i].x, coins[i].y, coins[i].radius, player)) {
+          score += 10;
+          coins.splice(i, 1);
+        } else if (coins[i].y > canvas.height + 50) {
+          coins.splice(i, 1);
+        }
+      }
+
+      if (gameOver) {
+        setTimeout(() => {
+          if (gameOver) resetGame();
+        }, 1000);
+      }
+    }
+
+    function drawRoad() {
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#3b3f46';
+      ctx.fillRect(road.left, 0, road.width, canvas.height);
+
+      ctx.fillStyle = '#111827';
+      ctx.fillRect(road.left - 15, 0, 15, canvas.height);
+      ctx.fillRect(road.right, 0, 15, canvas.height);
+
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([30, 24]);
+      ctx.beginPath();
+      ctx.moveTo(road.left + road.width / 3, 0);
+      ctx.lineTo(road.left + road.width / 3, canvas.height);
+      ctx.moveTo(road.left + (2 * road.width) / 3, 0);
+      ctx.lineTo(road.left + (2 * road.width) / 3, canvas.height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#94a3b8';
+      for (let i = 0; i < 20; i++) {
+        const y = ((i * 55 + road.scroll) % (canvas.height + 80)) - 80;
+        ctx.fillRect(road.left + road.width / 2 - 4, y, 8, 35);
+      }
+    }
+
+    function drawCar(x, y, width, height, color, angle = 0) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+
+      ctx.fillStyle = color;
+      ctx.fillRect(-width / 2, -height / 2, width, height);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(-width / 2 + 5, -height / 2 + 8, width - 10, height - 16);
+
+      ctx.fillStyle = '#dbeafe';
+      ctx.fillRect(-width / 2 + 4, -height / 2 + 6, 7, 12);
+      ctx.fillRect(width / 2 - 11, -height / 2 + 6, 7, 12);
+      ctx.fillRect(-width / 2 + 4, height / 2 - 18, 7, 12);
+      ctx.fillRect(width / 2 - 11, height / 2 - 18, 7, 12);
+
+      ctx.restore();
+    }
+
+    function drawCoin(coin) {
+      ctx.beginPath();
+      ctx.fillStyle = coin.color;
+      ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawObstacle(obs) {
+      drawCar(obs.x, obs.y, obs.width, obs.height, obs.color, 0);
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 36px Arial';
+      ctx.fillText('CRASH!', canvas.width / 2, canvas.height / 2 - 20);
+      ctx.font = '20px Arial';
+      ctx.fillText('Restarting...', canvas.width / 2, canvas.height / 2 + 20);
+    }
+
+    function draw() {
+      drawRoad();
+
+      for (const coin of coins) drawCoin(coin);
+      for (const obs of obstacles) drawObstacle(obs);
+
+      drawCar(player.x, player.y, player.width, player.height, player.color, player.angle);
+
+      if (gameOver) {
+        drawGameOver();
+      }
+    }
+
+    function loop(timestamp) {
+      const dt = clamp((timestamp - lastTime) / 1000 || 0.016, 0.016, 0.032);
+      lastTime = timestamp;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.addEventListener('keydown', (event) => {
+      const key = event.key.toLowerCase();
+      if (key === 'arrowleft' || key === 'a') keys.left = true;
+      if (key === 'arrowright' || key === 'd') keys.right = true;
+      if (key === 'arrowup' || key === 'w') keys.up = true;
+      if (key === 'arrowdown' || key === 's') keys.down = true;
+      if (key === ' ' || key === 'shift') keys.boost = true;
+      if (event.code === 'Space' && gameOver) resetGame();
+    });
+
+    document.addEventListener('keyup', (event) => {
+      const key = event.key.toLowerCase();
+      if (key === 'arrowleft' || key === 'a') keys.left = false;
+      if (key === 'arrowright' || key === 'd') keys.right = false;
+      if (key === 'arrowup' || key === 'w') keys.up = false;
+      if (key === 'arrowdown' || key === 's') keys.down = false;
+      if (key === ' ' || key === 'shift') keys.boost = false;
+    });
+
+    resetGame();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
